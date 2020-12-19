@@ -6,10 +6,7 @@ import sys
 from jinja2 import Environment, FileSystemLoader
 
 import errbot
-from errbot.backends.base import ONLINE, Message
-from errbot.backends.text import (  # we use that as we emulate MUC there already
-    TextBackend,
-)
+from errbot.backends.base import Message, ONLINE
 from errbot.rendering import xhtml
 
 CARD_TMPL = Environment(
@@ -19,9 +16,20 @@ CARD_TMPL = Environment(
 log = logging.getLogger(__name__)
 
 try:
-    from PySide import QtCore, QtGui, QtWebKit
-    from PySide.QtCore import Qt
-    from PySide.QtGui import QCompleter
+    from PySide2 import QtCore, QtGui
+    from PySide2.QtWebEngineWidgets import (
+        QWebEngineView as QWebView,
+        QWebEnginePage as QWebPage,
+    )
+    from PySide2.QtWidgets import (
+        QCompleter,
+        QPlainTextEdit,
+        QApplication,
+        QWidget,
+        QVBoxLayout,
+        QLabel,
+    )
+    from PySide2.QtCore import Qt
 except ImportError:
     log.exception("Could not start the graphical backend")
     log.fatal(
@@ -32,7 +40,7 @@ except ImportError:
     sys.exit(-1)
 
 
-class CommandBox(QtGui.QPlainTextEdit):
+class CommandBox(QPlainTextEdit, object):
     newCommand = QtCore.Signal(str)
 
     def reset_history(self):
@@ -153,21 +161,24 @@ TOP = f"<html><body style=\"background-image: url('file://{bg_path}');\">"
 BOTTOM = "</body></html>"
 
 
-class ChatApplication(QtGui.QApplication):
+class ChatApplication(QApplication):
     newAnswer = QtCore.Signal(str)
 
     def __init__(self, bot):
         self.bot = bot
         super().__init__(sys.argv)
-        self.mainW = QtGui.QWidget()
+        self.mainW = QWidget()
         self.mainW.setWindowTitle("Errbot")
         self.mainW.setWindowIcon(QtGui.QIcon(icon_path))
-        vbox = QtGui.QVBoxLayout()
-        help_label = QtGui.QLabel(
+        vbox = QVBoxLayout()
+        help_label = QLabel(
             "ctrl or alt+space for autocomplete -- ctrl or alt+Enter to send your message"
         )
+        # self.input = CommandBox(bot.cmd_history[str(bot.user)], bot.all_commands, bot.bot_config.BOT_PREFIX)
         self.input = CommandBox(
-            bot.cmd_history[str(bot.user)], bot.all_commands, bot.bot_config.BOT_PREFIX
+            bot.cmd_history[str("bot.user")],
+            bot.all_commands,
+            bot.bot_config.BOT_PREFIX,
         )
         self.demo_mode = (
             hasattr(bot.bot_config, "TEXT_DEMO_MODE") and bot.bot_config.TEXT_DEMO_MODE
@@ -176,9 +187,9 @@ class ChatApplication(QtGui.QApplication):
         font.setPointSize(30 if self.demo_mode else 15)
         self.input.setFont(font)
 
-        self.output = QtWebKit.QWebView()
+        self.output = QWebView()
         css = demo_css_path if self.demo_mode else css_path
-        self.output.settings().setUserStyleSheetUrl(QtCore.QUrl.fromLocalFile(css))
+        # self.output.settings().setUserStyleSheetUrl(QtCore.QUrl.fromLocalFile(css))
 
         # init webpage
         self.buffer = ""
@@ -191,7 +202,7 @@ class ChatApplication(QtGui.QApplication):
         self.mainW.setLayout(vbox)
 
         # setup web view to open liks in external browser
-        self.output.page().setLinkDelegationPolicy(QtWebKit.QWebPage.DelegateAllLinks)
+        # self.output.page().setLinkDelegationPolicy(QWebPage.DelegateAllLinks)
 
         # connect signals/slots
         self.output.page().mainFrame().contentsSizeChanged.connect(
@@ -228,7 +239,7 @@ class ChatApplication(QtGui.QApplication):
         self.input.updateCompletion(commands)
 
 
-class GraphicBackend(TextBackend):
+class GraphicBackend(errbot.core.ErrBot):
     def __init__(self, config):
         super().__init__(config)
         # create window and components
@@ -292,3 +303,39 @@ class GraphicBackend(TextBackend):
     def prefix_groupchat_reply(self, message, identifier):
         super().prefix_groupchat_reply(message, identifier)
         message.body = f"@{identifier.nick} {message.body}"
+
+    def build_identifier(self, text_representation):
+        if text_representation.startswith("#"):
+            rem = text_representation[1:]
+            if "/" in text_representation:
+                room, person = rem.split("/")
+                return TextOccupant(TextPerson(person), TextRoom(room, self))
+            return self.query_room("#" + rem)
+        if not text_representation.startswith("@"):
+            raise ValueError(
+                "An identifier for the Text backend needs to start with # for a room or @ for a person."
+            )
+        return TextPerson(text_representation[1:])
+
+    def build_reply(self, msg, text=None, private=False, threaded=False):
+        response = self.build_message(text)
+        response.frm = self.bot_identifier
+        if private:
+            response.to = msg.frm
+        else:
+            response.to = msg.frm.room if isinstance(msg.frm, RoomOccupant) else msg.frm
+        return response
+
+    def query_room(self, room):
+        if not room.startswith("#"):
+            raise ValueError("A Room name must start by #.")
+        text_room = TextRoom(room[1:], self)
+        if text_room not in self._rooms:
+            self._rooms.insert(0, text_room)
+        else:
+            self._rooms.insert(0, self._rooms.pop(self._rooms.index(text_room)))
+        return text_room
+
+    @property
+    def rooms(self):
+        return self._rooms

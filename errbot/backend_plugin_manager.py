@@ -60,6 +60,7 @@ class BackendPluginManager:
         plugin_classes = self.plugin_info.load_plugin_classes(
             self._base_module, self._base_class
         )
+        print(plugin_classes)
         if len(plugin_classes) != 1:
             raise PluginNotFoundException(
                 f"Found more that one plugin for {self._base_class}."
