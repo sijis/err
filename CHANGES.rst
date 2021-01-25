@@ -8,6 +8,7 @@ fixes:
 - docs: Update backend screenshots (#1499)
 - docs: Remove Google+ references (#1497)
 - core: Split messages using `split()` instead of whitespace (#1496)
+- backend/GUI: Remove GUI backend (#1495)
 
 v6.1.7 (2020-12-18)
 -------------------
